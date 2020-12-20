@@ -523,7 +523,7 @@ def main():
 
     cosmo = FlatLambdaCDM(H0=69.6, Om0=0.286)
 
-    parameters = pd.read_hdf('injections_1e6.hdf5')
+    parameters = pd.read_hdf('BBH_injections_1e6.hdf5')
     if population == 'BNS':
         # here it is neglected that p(z) is different for BNS and BBH
         parameters['mass_1'].iloc[:] = 1.4  # 1.33+0.09*np.random.randn()

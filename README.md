@@ -1,4 +1,7 @@
 # Einstein Telescope
+Created by Jan Harms
+Gran Sasso Science Institute
+
 This repository contains functions to simulate signal-detection and parameter-estimation problems for the Einstein Telescope and other current and future detectors.
 
 ## CBC_SNR
@@ -6,8 +9,7 @@ This repository contains functions to simulate signal-detection and parameter-es
 
 Shield: [![CC BY 4.0][cc-by-shield]][cc-by]
 
-This work is licensed under a [Creative Commons Attribution 4.0 International
-License][cc-by].
+This work is licensed under a [Creative Commons Attribution 4.0 International License][cc-by].
 
 [![CC BY 4.0][cc-by-image]][cc-by]
 
