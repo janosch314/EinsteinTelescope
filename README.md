@@ -1,6 +1,5 @@
 # Einstein Telescope
-Created by Jan Harms
-Gran Sasso Science Institute
+Created by Jan Harms (Gran Sasso Science Institute)
 
 This repository contains functions to simulate signal-detection and parameter-estimation problems for the Einstein Telescope and other current and future detectors.
 
