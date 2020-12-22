@@ -408,7 +408,7 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
     fs = 2*ff[-1]
 
     def dSNR(z):
-        z = np.max([1e-10,z[0]])
+        z = np.max([1.,z[0]])
 
         r = cosmo.luminosity_distance(z).value * 3.086e22
 
@@ -467,10 +467,10 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
 
 def analyzeHistograms(network_SNR, threshold_ii, parameters, population, plot, tag=''):
         ns = len(network_SNR)
-        nsub = np.sum(network_SNR<8)
+        ndet = len(threshold_ii)
         maxz = np.max(parameters['redshift'].iloc[threshold_ii].to_numpy())
         maxSNR = np.max(network_SNR)
-        print('Fraction of detected signals: {:.3f} ({:} out of {:})'.format(1-nsub/ns, ns-nsub, ns))
+        print('Fraction of detected signals: {:.3f} ({:} out of {:})'.format(ndet/ns, ndet, ns))
         print('Maximum detected redshift %.3f' % maxz)
         print('SNR: {:.1f} (min) , {:.1f} (max) '.format(np.min(network_SNR), np.max(network_SNR)))
 
@@ -516,21 +516,30 @@ def analyzeHistograms(network_SNR, threshold_ii, parameters, population, plot, t
 
 def main():
 
+    """
+    I recommend to carry out simulations in frequency domain: frequencydomain = True.
+    The TaylorT2 time-domain waveform does not produce very accurate SNR estimates. It was initially used since it
+    seemed easiest to include the effect of Earth rotation in time domain. However, under stationary-phase approximation
+    it is possible to include the effect of rotation rather easily in frequency domain as well. As a consequence,
+    we have a computationally very efficient code to estimate BNS SNRs including the effect of Earth rotation.
+    """
     #fs = 1024    # good for BBH in ET
     fs = 2048   # good for BNS in ET
     #T = 512    # good for BBH in ET with TaylorT2
-    T = 8    # good for ET with TaylorF2
+    T = 4    # good for ET with TaylorF2
     #T = 65536  # good for BNS in ET with TaylorT2
 
+    detSNR = 12  #SNR threshold for detection
+
     plot = {'timeseries': False, 'spectra': False, 'instantaneous_frequency': False, 'SNR': True}
-    population = 'BNS'
+    population = 'BNS_ET_SNR'+str(detSNR)
     timedomain = False
     frequencydomain = True
 
     cosmo = FlatLambdaCDM(H0=69.6, Om0=0.286)
 
     parameters = pd.read_hdf('BBH_injections_1e6.hdf5')
-    if population == 'BNS':
+    if population[0:3] == 'BNS':
         # here it is neglected that p(z) is different for BNS and BBH
         parameters['mass_1'].iloc[:] = 1.4  # 1.33+0.09*np.random.randn()
         parameters['mass_2'].iloc[:] = 1.4  # 1.33+0.09*np.random.randn()
@@ -540,10 +549,11 @@ def main():
 
     frequencyvector = np.linspace(0.0, fs/2.0, (fs*T)//2+1)
     frequencyvector = frequencyvector[:, np.newaxis]
-    zmax = horizon(detectors, parameters.iloc[0], cosmo, frequencyvector, 8.)
-    print(population + ' horizon (time-invariant antenna pattern): ' + str(zmax))
+    zmax = horizon(detectors, parameters.iloc[0], cosmo, frequencyvector, detSNR)
+    print(population + ' horizon (time-invariant antenna pattern; M='
+          + str(parameters['mass_1'].iloc[0]+parameters['mass_2'].iloc[0]) + '): ' + str(zmax))
 
-    ns = 10000
+    ns = 100000
 
     network_SNR_TD = np.zeros(ns)
     threshold_ii_TD = []
@@ -601,7 +611,7 @@ def main():
             wave_FD, t_of_f = TaylorF2(one_parameters, cosmo, frequencyvector[1:,:], maxn=8)
             t_of_f = np.zeros_like(t_of_f)
             signal_FD = projection(one_parameters, detectors, wave_FD, t_of_f)
-
+            # fill the first sample of Fourier spectra with value 0, since it was left out to avoid division at f=0
             signal_FD = np.vstack((np.zeros(len(detectors)),signal_FD))
 
         if plot['timeseries']:
@@ -648,13 +658,13 @@ def main():
 
         if frequencydomain:
             SNRs = SNR(detectors, signal_FD, T, fs) #, plot='FD'+str(k))[0]
-            network_SNR_FD[k] = np.sqrt(np.sum(SNRs ** 2))
-            if (network_SNR_FD[k]>8):
+            network_SNR_FD[k] = np.sqrt(np.sum(SNRs**2))
+            if (network_SNR_FD[k]>detSNR):
                 threshold_ii_FD.append(k)
         if timedomain:
             SNRs = SNR(detectors, fft_spectrum, T, fs) #, plot='TD'+str(k))[0]
             network_SNR_TD[k] = np.sqrt(np.sum(SNRs**2))
-            if (network_SNR_TD[k]>8):
+            if (network_SNR_TD[k]>detSNR):
                 threshold_ii_TD.append(k)
 
         bar.update(k)
