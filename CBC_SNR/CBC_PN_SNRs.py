@@ -164,7 +164,7 @@ def TaylorF2(parameters, cosmo, frequencyvector, maxn=8, plot=None):
     Mc = G*mu**0.6*M**0.4/c**3
 
     # compute GW amplitudes (https://arxiv.org/pdf/2012.01350.pdf)
-    hp = c/(2.*r)*np.sqrt(5.*np.pi/24.)*Mc**(5./6.)/(np.pi*ff)**(7./6.)*(1.+np.cos(iota)**2)
+    hp = c/(2.*r)*np.sqrt(5.*np.pi/24.)*Mc**(5./6.)/(np.pi*ff)**(7./6.)*(1.+np.cos(iota)**2.)
     hc = c/(2.*r)*np.sqrt(5.*np.pi/24.)*Mc**(5./6.)/(np.pi*ff)**(7./6.)*2.*np.cos(iota)
 
     C = 0.57721566  # Euler constant
@@ -191,7 +191,8 @@ def TaylorF2(parameters, cosmo, frequencyvector, maxn=8, plot=None):
 
     psi *= 3./(128.*eta*v**5)
     psi += 2.*np.pi*ff*tc-phic-np.pi/4.
-    polarizations = np.hstack((hp*np.exp(1j*psi), hc*np.exp(1j*(psi+np.pi/2.))))
+    phase = np.exp(1.j*psi)
+    polarizations = np.hstack((hp*phase, hc*1.j*phase))
     polarizations[np.where(ff>3*f_isco),:] = 0.j   # very crude high-f cut-off
 
     # t(f) is required to calculate slowly varying antenna pattern as function of instantaneous frequency.
@@ -332,6 +333,8 @@ def projection(parameters, detectors, polarizations, timevector):
     #start_time = time.time()
     #hpij = np.einsum('ij,ik->ijk', m, m) - np.einsum('ij,ik->ijk', n, n)
     #hcij = np.einsum('ij,ik->ijk', m, n) + np.einsum('ij,ik->ijk', n, m)
+    #hpij = np.array([[1,0,0],[0,-1,0],[0,0,0]])
+    #hcij = np.array([[0,1,0],[0,-1,0],[0,0,0]])
     #print("Creating polarizations matrices: %s seconds" % (time.time() - start_time))
 
     #start_time = time.time()
@@ -344,15 +347,13 @@ def projection(parameters, detectors, polarizations, timevector):
     hzz = polarizations[:, 0]*(mz*mz-nz*nz)+polarizations[:, 1]*(mz*nz+nz*mz)
     #print("Calculation GW tensor: %s seconds" % (time.time() - start_time))
 
-    #hpij = np.array([[1,0,0],[0,-1,0],[0,0,0]])
-    #hcij = np.array([[0,1,0],[0,-1,0],[0,0,0]])
-
     #start_time = time.time()
     for k in np.arange(len(detectors)):
         e1 = detectors[k].e1
         e2 = detectors[k].e2
-        #e1 = np.array([1,0,0])
-        #e2 = np.array([np.cos(np.pi/3.),np.sin(np.pi/3.),0])
+        n = k
+        e1 = np.array([np.cos(n * np.pi * 2. / 3.), np.sin(n * np.pi * 2. / 3.), 0.])
+        e2 = np.array([np.cos(np.pi / 3. + n * np.pi * 2. / 3.), np.sin(np.pi / 3. + n * np.pi * 2. / 3.), 0.])
 
         #proj[:,k] = 0.5*(e1 @ hij @ e1 - e2 @ hij @ e2)
         proj[:, k] = 0.5 * (e1[0]**2-e2[0]**2)*hxx\
@@ -407,7 +408,7 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
     fs = 2*ff[-1]
 
     def dSNR(z):
-        z = np.maximum(0.1,z[0])
+        z = np.max([1e-10,z[0]])
 
         r = cosmo.luminosity_distance(z).value * 3.086e22
 
@@ -430,25 +431,28 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
         hp[ff[1:] > 3*f_isco_z] = 0  # very crude, but reasonable high-f cut-off; matches roughly IMR spectra (in qadrupole order)
         hp = np.vstack(([0],hp))
 
-        hc = hp
+        hc = 1.j*hp
 
         hpij = np.array([[1,0,0],[0,-1,0],[0,0,0]])
         hcij = np.array([[0,1,0],[1,0,0],[0,0,0]])
 
         # project signal onto the detector
-        proj = np.zeros((len(hp), len(detectors)))
+        proj = np.zeros((len(hp), len(detectors)), dtype=complex)
 
         for k in np.arange(len(detectors)):
             if detectors[k].name[0:2] == 'ET':
                 n = detectors[k].ifo_id
-                e1 = np.array([np.cos(n*np.pi*2./3.),np.sin(n*np.pi*2./3.),0.])
-                e2 = np.array([np.cos(np.pi/3.+n*np.pi*2./3.),np.sin(np.pi/3.+n*np.pi*2./3.),0.])
+                az = n*np.pi*2./3.
+                e1 = np.array([np.cos(az),np.sin(az),0.])
+                e2 = np.array([np.cos(az+np.pi/3.),np.sin(az+np.pi/3.),0.])
             else:
                 e1 = np.array([1., 0., 0.])
                 e2 = np.array([0., 1., 0.])
 
             proj[:, k] = 0.5 * hp[:,0] * (e1 @ hpij @ e1 - e2 @ hpij @ e2) \
-                         + 0.5 * 1j*hc[:,0] * (e1 @ hcij @ e1 - e2 @ hcij @ e2)
+                        +0.5 * hc[:,0] * (e1 @ hcij @ e1 - e2 @ hcij @ e2)
+            #proj[:, k] = 0.5 * hp[:, 0] * (e1 @ hpij @ e1 - e2 @ hpij @ e2)
+            #proj[:, k] = 0.5j * hc[:, 0] * (e1 @ hcij @ e1 - e2 @ hcij @ e2)
 
         SNRs = SNR(detectors, proj, T, fs)
         SNRtot = np.sqrt(np.sum(SNRs**2))
@@ -595,6 +599,7 @@ def main():
 
         if frequencydomain:
             wave_FD, t_of_f = TaylorF2(one_parameters, cosmo, frequencyvector[1:,:], maxn=8)
+            t_of_f = np.zeros_like(t_of_f)
             signal_FD = projection(one_parameters, detectors, wave_FD, t_of_f)
 
             signal_FD = np.vstack((np.zeros(len(detectors)),signal_FD))
@@ -642,14 +647,14 @@ def main():
             plt.close()
 
         if frequencydomain:
-            SNRs = SNR(detectors, signal_FD, T, fs)[0] #, plot='FD'+str(k))[0]
+            SNRs = SNR(detectors, signal_FD, T, fs) #, plot='FD'+str(k))[0]
             network_SNR_FD[k] = np.sqrt(np.sum(SNRs ** 2))
             if (network_SNR_FD[k]>8):
                 threshold_ii_FD.append(k)
         if timedomain:
-            SNRs = SNR(detectors, fft_spectrum, T, fs)[0] #, plot='TD'+str(k))[0]
+            SNRs = SNR(detectors, fft_spectrum, T, fs) #, plot='TD'+str(k))[0]
             network_SNR_TD[k] = np.sqrt(np.sum(SNRs**2))
-            if (network_SNR_TD[k] > 8):
+            if (network_SNR_TD[k]>8):
                 threshold_ii_TD.append(k)
 
         bar.update(k)
