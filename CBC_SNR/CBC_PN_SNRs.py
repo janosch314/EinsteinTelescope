@@ -487,7 +487,7 @@ def analyzeHistograms(network_SNR, threshold_ii, parameters, population, plot, t
         if plot['SNR']:
             hist_det, zz = np.histogram(parameters['redshift'].iloc[threshold_ii].to_numpy(), zz)
             plt.bar(0.5*(zz[0:-1]+zz[1:]), hist_det, align='center', alpha=0.5, width=0.9*(zz[1]-zz[0]))
-            plt.xlabel('Redshift of SNR>8 signals')
+            plt.xlabel('Redshift of detected signals ('+population+')')
             plt.ylabel('Count')
             plt.xlim(0, np.ceil(maxz))
             plt.grid(True)
