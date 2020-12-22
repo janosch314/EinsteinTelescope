@@ -448,7 +448,7 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
                 e2 = np.array([0., 1., 0.])
 
             proj[:, k] = 0.5 * hp[:,0] * (e1 @ hpij @ e1 - e2 @ hpij @ e2) \
-                         + 0.5 * hc[:,0] * (e1 @ hcij @ e1 - e2 @ hcij @ e2)
+                         + 0.5 * 1j*hc[:,0] * (e1 @ hcij @ e1 - e2 @ hcij @ e2)
 
         SNRs = SNR(detectors, proj, T, fs)
         SNRtot = np.sqrt(np.sum(SNRs**2))
