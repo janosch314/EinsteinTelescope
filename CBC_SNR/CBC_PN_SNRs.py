@@ -427,15 +427,16 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
 
         # compute GW amplitudes (https://arxiv.org/pdf/2012.01350.pdf) with optimal orientation
         hp = c/r * np.sqrt(5.*np.pi/24.) * Mc**(5./6.) / (np.pi*ff[1:])**(7./6.)
-
         hp[ff[1:] > 3*f_isco_z] = 0  # very crude, but reasonable high-f cut-off; matches roughly IMR spectra (in qadrupole order)
-
         hp = np.vstack(([0],hp))
 
+        hc = hp
+
         hpij = np.array([[1,0,0],[0,-1,0],[0,0,0]])
+        hcij = np.array([[0,1,0],[1,0,0],[0,0,0]])
 
         # project signal onto the detector
-        projp = np.zeros((len(hp), len(detectors)))
+        proj = np.zeros((len(hp), len(detectors)))
 
         for k in np.arange(len(detectors)):
             if detectors[k].name[0:2] == 'ET':
@@ -446,9 +447,10 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
                 e1 = np.array([1., 0., 0.])
                 e2 = np.array([0., 1., 0.])
 
-            projp[:, k] = 0.5 * hp[:,0] * (e1 @ hpij @ e1 - e2 @ hpij @ e2)
+            proj[:, k] = 0.5 * hp[:,0] * (e1 @ hpij @ e1 - e2 @ hpij @ e2) \
+                         + 0.5 * hc[:,0] * (e1 @ hcij @ e1 - e2 @ hcij @ e2)
 
-        SNRs = SNR(detectors, projp, T, fs)
+        SNRs = SNR(detectors, proj, T, fs)
         SNRtot = np.sqrt(np.sum(SNRs**2))
 
         #print('z = ' + str(z) + ', r = ' + str(cosmo.luminosity_distance(z).value) + 'Mpc, SNR = '+str(SNRtot))
