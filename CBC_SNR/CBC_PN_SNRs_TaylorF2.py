@@ -223,63 +223,6 @@ def TaylorF2(parameters, cosmo, frequencyvector, maxn=8, plot=None):
 
     return polarizations, t_of_f
 
-def TaylorT2(parameters, cosmo, timevector, maxn=8):
-    tt = timevector
-    ones = np.ones((len(tt),1))
-
-    phic = parameters['phase']
-    tc = parameters['geocent_time']
-    z = parameters['redshift']
-    r = cosmo.luminosity_distance(z).value * 3.086e22
-    iota = parameters['iota']
-
-    # define necessary variables, multiplied with solar mass, parsec, etc.
-    M = (parameters['mass_1'] + parameters['mass_2']) * 1.9885e30 * (1+z)
-    mu = (parameters['mass_1'] * parameters['mass_2'] / (
-            parameters['mass_1'] + parameters['mass_2'])) * 1.9885e30 * (1+z)
-
-    # define constants
-    c = 299792458
-    G = 6.674e-11
-
-    Mc = G*mu**0.6*M**0.4/c**3
-
-    # compute GW amplitudes
-    hp = (c/(2*r))*(Mc**5/(tc-tt))**0.25*(1+np.cos(iota)**2)
-    hc = (c/(2*r))*(Mc**5/(tc-tt))**0.25*2*np.cos(iota)
-
-    # define coefficients for the metric perturbations
-    C = 0.57721566
-    eta = mu/M
-
-    tau = eta*c**3*(tc-tt)/(5*G*M)
-    tau0 = eta*c**3*(tc-tt[0])/(5*G*M)
-
-    # coefficients of the PN expansion
-    pp = np.array([1., 0., 3715./8064.+eta*55./96., -3./4.*np.pi,
-          9275495./14450688.+eta*284875./258048.+eta**2*1855./2048.,
-          0.,
-          831032450749357./57682522275840.-np.pi**2*53./40.-C*107./56.
-             +(-126510089885./4161798144.+np.pi**2*2255./2048.)*eta+eta**2*154565./1835008.-eta**3*1179625./1769472.,
-          np.pi*(188516689./173408256.+eta*140495./114688.-eta**2*122659./516096.)])
-
-    phi = 0.
-
-    for k in np.arange(maxn):
-        PNc = pp[k]
-        if k==5:
-            PNc += (-38645./172032.-eta*15./2048.)*np.pi*np.log(tau/tau0)
-        elif k==6:
-            PNc += np.log(tau/256.)*107./448.
-        phi += PNc*tau**((5-k)/8.)
-
-    phi *= -(2./eta)
-
-    polarizations = np.hstack((hp*np.cos(phi+phic), hc*np.sin(phi+phic)))
-    polarizations[np.where(tt>=tc-0.5*G*M/c**3),:] = 0
-
-    return polarizations
-
 def GreenwichMeanSiderealTime(gps):
     # calculate the Greenwhich mean sidereal time
 
@@ -376,15 +319,6 @@ def projection(parameters, detectors, polarizations, timevector):
     #print("Calculation of projection: %s seconds" % (time.time() - start_time))
 
     return proj
-
-def FFT(timeseries,T,fs,taper):
-
-    fft_spectrum = np.zeros((T*fs//2+1, len(timeseries[0,:])),dtype=complex)
-    for k in np.arange(len(timeseries[0,:])):
-        this_series = timeseries[:,k]*taper[:,0]
-        fft_spectrum[:,k] = np.fft.rfft(this_series)/fs
-
-    return fft_spectrum
 
 def SNR(detectors, signals, T, fs, duty_cycle=False, plot=None):
 
@@ -563,18 +497,9 @@ def analyzeDetections(network_SNR, threshold_ii, SNR0, parameters, population, p
 
 def main():
 
-    """
-    I recommend to carry out simulations in frequency domain: frequencydomain = True.
-    The TaylorT2 time-domain waveform does not produce very accurate SNR estimates. It was initially used since it
-    seemed easiest to include the effect of Earth rotation in time domain. However, under stationary-phase approximation
-    it is possible to include the effect of rotation rather easily in frequency domain as well. As a consequence,
-    we have a computationally very efficient code to estimate BNS SNRs including the effect of Earth rotation.
-    """
     #fs = 1024    # good for BBH in ET
     fs = 2048   # good for BNS in ET
-    #T = 512    # good for BBH in ET with TaylorT2
     T = 4    # good for ET with TaylorF2
-    #T = 65536  # good for BNS in ET with TaylorT2
 
     ns = 820000  # number of signals to simulate (1e6 is maximum for BBH, 820000 is maximum for BNS)
 
@@ -588,9 +513,6 @@ def main():
 
     detectors = Detector(name='ET').interferometers
     # detectors = Detector(name='CE2').interferometers
-
-    timedomain = False
-    frequencydomain = True
 
     cosmo = FlatLambdaCDM(H0=69.6, Om0=0.286)
 
@@ -614,8 +536,6 @@ def main():
               + str(parameters['mass_1'].iloc[0]+parameters['mass_2'].iloc[0]) + '; SNR>'
               + str(detSNR[k]) + '): {:.3f}'.format(zmax[k]))
 
-    network_SNR_TD = np.zeros(ns)
-    threshold_ii_TD = np.zeros((ns, len(detSNR)))
     network_SNR_FD = np.zeros(ns)
     threshold_ii_FD = np.zeros((ns, len(detSNR)))
 
@@ -648,40 +568,11 @@ def main():
         # characteristic time scale
         dT = 1./fisco(one_parameters)
 
-        timevector = np.linspace(tc-T-0.5*dT,tc-0.5*dT,T*fs)
-        timevector = timevector[:,np.newaxis]
-
-        if timedomain:
-            print('')
-            start_time = time.time()
-            wave_TD = TaylorT2(one_parameters,cosmo,timevector)
-            print("Calculation of waveform: %s seconds" % (time.time() - start_time))
-
-            signal_TD = projection(one_parameters, detectors, wave_TD, timevector)
-
-            #taper = 1./(1.+np.exp(-(timevector-timevector[0]-10*dT)/(10*dT))+np.exp(-(tc-1800*dT-timevector)/(10*dT)))
-            taper = np.ones_like(timevector)
-
-            start_time = time.time()
-            fft_spectrum = FFT(signal_TD, T, fs, taper)
-            print("Calculation of FFT: %s seconds" % (time.time() - start_time))
-
-        if frequencydomain:
-            wave_FD, t_of_f = TaylorF2(one_parameters, cosmo, frequencyvector[1:,:], maxn=8)
-            t_of_f = np.zeros_like(t_of_f)
-            signal_FD = projection(one_parameters, detectors, wave_FD, t_of_f)
-            # fill the first sample of Fourier spectra with value 0, since it was left out to avoid division at f=0
-            signal_FD = np.vstack((np.zeros(len(detectors)),signal_FD))
-
-        if plot['timeseries']:
-            plt.figure()
-            plt.plot(timevector-timevector[0], taper*signal_TD)
-            plt.xlabel('Time [s]')
-            plt.ylabel('GW amplitude')
-            plt.grid(True)
-            plt.tight_layout()
-            plt.savefig('waveform_n' + str(k) + '.png', dpi=300)
-            plt.close()
+        wave_FD, t_of_f = TaylorF2(one_parameters, cosmo, frequencyvector[1:,:], maxn=8)
+        t_of_f = np.zeros_like(t_of_f)
+        signal_FD = projection(one_parameters, detectors, wave_FD, t_of_f)
+        # fill the first sample of Fourier spectra with value 0, since it was left out to avoid division at f=0
+        signal_FD = np.vstack((np.zeros(len(detectors)),signal_FD))
 
         if plot['spectra']:
             plt.figure()
@@ -696,48 +587,18 @@ def main():
             plt.savefig('waveform_n' + str(k) + '_fft.png', dpi=300)
             plt.close()
 
-        if plot['instantaneous_frequency']:
-            template = (wave_TD[:,0] + wave_TD[:,1]*1.j)
-
-            tphase = np.unwrap(np.angle(template))
-            fGW = np.abs(np.gradient(tphase))*fs/(2.*np.pi)
-
-            si = 10
-            fGW[0:si] = fGW[si:-si].min()
-            fGW[-si:] = fGW[si:-si].max()
-
-            plt.figure()
-            plt.semilogy(timevector-timevector[0], fGW)
-            plt.xlabel('Time [s]')
-            plt.ylabel('Frequency [Hz]')
-            plt.grid(True)
-            plt.tight_layout()
-            plt.savefig('frequency_n' + str(k) + '.png', dpi=300)
-            plt.close()
-
-        if frequencydomain:
-            SNRs = SNR(detectors, signal_FD, T, fs, duty_cycle=True) #, plot='FD'+str(k))[0]
-            network_SNR_FD[k] = np.sqrt(np.sum(SNRs**2))
-            for l in np.arange(len(detSNR)):
-                if (network_SNR_FD[k]>detSNR[l]):
-                    threshold_ii_FD[k,l] = 1
-        if timedomain:
-            SNRs = SNR(detectors, fft_spectrum, T, fs, duty_cycle=True) #, plot='TD'+str(k))[0]
-            network_SNR_TD[k] = np.sqrt(np.sum(SNRs**2))
-            for l in np.arange(len(detSNR)):
-                if (network_SNR_TD[k] > detSNR[l]):
-                    threshold_ii_TD[k,l] = 1
+        SNRs = SNR(detectors, signal_FD, T, fs, duty_cycle=True) #, plot='FD'+str(k))[0]
+        network_SNR_FD[k] = np.sqrt(np.sum(SNRs**2))
+        for l in np.arange(len(detSNR)):
+            if (network_SNR_FD[k]>detSNR[l]):
+                threshold_ii_FD[k,l] = 1
 
         bar.update(k)
 
     bar.finish()
     print('')
 
-    if frequencydomain:
-        analyzeDetections(network_SNR_FD, threshold_ii_FD, detSNR, parameters, population, plot, tag='FD')
-
-    if timedomain:
-        analyzeDetections(network_SNR_TD, threshold_ii_TD, detSNR, parameters, population, plot, tag='TD')
+    analyzeDetections(network_SNR_FD, threshold_ii_FD, detSNR, parameters, population, plot, tag='FD')
 
 
 if __name__ == '__main__':
