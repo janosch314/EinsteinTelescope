@@ -3,6 +3,7 @@ import pandas as pd
 
 import time
 import progressbar
+import itertools
 
 import scipy.optimize as optimize
 import matplotlib.pyplot as plt
@@ -15,8 +16,6 @@ class Interferometer:
         self.plot = plot
         self.ifo_id = interferometer
         self.name = name+str(interferometer)
-
-        self.R_earth = 6730000.
 
         self.setProperties()
 
@@ -85,7 +84,7 @@ class Interferometer:
             self.psd_data = np.loadtxt('CE2_psd.txt')
 
             self.duty_factor = 0.85
-        elif self.name == 'CEA':    # hypothetical CE2 in Australia
+        elif self.name == 'CEA':    # hypothetical CE1 in Australia
             self.lat = -20.517
             self.lon = 131.061
             self.arm_azimuth = 126. * np.pi / 180.
@@ -97,7 +96,7 @@ class Interferometer:
             self.e1 = np.cos(self.arm_azimuth) * e_long + np.sin(self.arm_azimuth) * e_lat
             self.e2 = np.cos(self.arm_azimuth + np.pi / 2.) * e_long + np.sin(self.arm_azimuth + np.pi / 2.) * e_lat
 
-            self.psd_data = np.loadtxt('CE2_psd.txt')
+            self.psd_data = np.loadtxt('CE1_psd.txt')
 
             self.duty_factor = 0.85
         elif self.name == 'L':
@@ -146,27 +145,33 @@ class Interferometer:
 
 class Detector:
 
-    def __init__(self, name='ET', plot=False):
+    def __init__(self, name='ET', number_of_signals=1, plot=False):
         self.interferometers = []
+        self.name = name
+        self.SNR = np.zeros(number_of_signals)
+
         if name=='ET':
             for k in np.arange(3):
-                self.interferometers.append(Interferometer(name=name, interferometer=k, plot=plot))
+                self.interferometers.append(
+                    Interferometer(name=name, interferometer=k, plot=plot))
         else:
-            self.interferometers.append(Interferometer(name=name, interferometer='', plot=plot))
+            self.interferometers.append(
+                Interferometer(name=name, interferometer='', plot=plot))
 
 class Network:
 
-    def __init__(self, detector_ids=['ET'], plot=False):
-        self.name = ''
-        for id in detector_ids:
-            self.name += id
+    def __init__(self, detector_ids=['ET'], number_of_signals=1, detection_SNR=8., plot=False):
+        self.name = detector_ids[0]
+        for id in detector_ids[1:]:
+            self.name += '_'+id
+
+        self.detection_SNR = detection_SNR
+        self.SNR = np.zeros(number_of_signals)
 
         self.detectors = []
         for d in np.arange(len(detector_ids)):
-            print(detector_ids[d])
-            detectors = Detector(name=detector_ids[d], plot=plot).interferometers
-            for i in np.arange(len(detectors)):
-                self.detectors.append(detectors[i])
+            detectors = Detector(name=detector_ids[d], number_of_signals=number_of_signals, plot=plot)
+            self.detectors.append(detectors)
 
 def fisco(parameters):
     c = 299792458.
@@ -327,7 +332,7 @@ def projection(parameters, detectors, polarizations, timevector):
 
     return proj
 
-def SNR(detectors, signals, T, fs, duty_cycle=False, plot=None):
+def SNR(interferometers, signals, T, fs, duty_cycle=False, plot=None):
 
     if signals.ndim==1:
         signals = signals[:,np.newaxis]
@@ -336,35 +341,35 @@ def SNR(detectors, signals, T, fs, duty_cycle=False, plot=None):
     if ff.ndim==1:
         ff = ff[:,np.newaxis]
 
-    SNRs = np.zeros(len(detectors))
-    for k in np.arange(len(detectors)):
+    SNRs = np.zeros(len(interferometers))
+    for k in np.arange(len(interferometers)):
         signal = np.abs(signals[1:,k])**2
-        SNRs[k] = 2*np.sqrt(np.sum(np.abs(signals[1:,k])**2/detectors[k].Sn(ff[1:,0]),axis=0)/T)
+        SNRs[k] = 2*np.sqrt(np.sum(np.abs(signals[1:,k])**2/interferometers[k].Sn(ff[1:,0]),axis=0)/T)
         if plot!=None:
             plt.figure()
-            plt.semilogx(ff[1:], 2*np.sqrt(np.abs(signals[1:,k])**2/detectors[k].Sn(ff[1:,0])/T))
+            plt.semilogx(ff[1:], 2*np.sqrt(np.abs(signals[1:,k])**2/interferometers[k].Sn(ff[1:,0])/T))
             plt.xlabel('Frequency [Hz]')
             plt.ylabel('SNR spectral density')
             plt.xlim((1, fs/2))
             plt.grid(True)
             plt.tight_layout()
-            plt.savefig('SNR_density' + detectors[k].name + '_' + plot + '.png')
+            plt.savefig('SNR_density' + interferometers[k].name + '_' + plot + '.png')
             plt.close()
 
         # set SNRs to zero if interferometer is not operating (according to its duty factor [0,1])
         if duty_cycle:
             operating = np.random.rand()
-            if detectors[k].duty_factor<operating:
+            if interferometers[k].duty_factor<operating:
                 SNRs[k] = 0.
 
     return SNRs
 
-def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
+def horizon(network, parameters, cosmo, frequencyvector, detSNR):
     ff = frequencyvector
     T = 1./(ff[1]-ff[0])
     fs = 2*ff[-1]
 
-    def dSNR(z, SNR0):
+    def dSNR(z, detector, SNR0):
         z = np.max([0.1,z[0]])
 
         r = cosmo.luminosity_distance(z).value * 3.086e22
@@ -393,12 +398,14 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
         hpij = np.array([[1,0,0],[0,-1,0],[0,0,0]])
         hcij = np.array([[0,1,0],[1,0,0],[0,0,0]])
 
-        # project signal onto the detector
-        proj = np.zeros((len(hp), len(detectors)), dtype=complex)
+        interferometers = detector.interferometers
 
-        for k in np.arange(len(detectors)):
-            if detectors[k].name[0:2] == 'ET':
-                n = detectors[k].ifo_id
+        # project signal onto the detector
+        proj = np.zeros((len(hp), len(interferometers)), dtype=complex)
+
+        for k in np.arange(len(interferometers)):
+            if detector.name == 'ET':
+                n = interferometers[k].ifo_id
                 az = n*np.pi*2./3.
                 e1 = np.array([np.cos(az),np.sin(az),0.])
                 e2 = np.array([np.cos(az+np.pi/3.),np.sin(az+np.pi/3.),0.])
@@ -411,95 +418,129 @@ def horizon(detectors, parameters, cosmo, frequencyvector, SNRmin):
             #proj[:, k] = 0.5 * hp[:, 0] * (e1 @ hpij @ e1 - e2 @ hpij @ e2)
             #proj[:, k] = 0.5j * hc[:, 0] * (e1 @ hcij @ e1 - e2 @ hcij @ e2)
 
-        SNRs = SNR(detectors, proj, T, fs)
+        SNRs = SNR(interferometers, proj, T, fs)
         SNRtot = np.sqrt(np.sum(SNRs**2))
 
         #print('z = ' + str(z) + ', r = ' + str(cosmo.luminosity_distance(z).value) + 'Mpc, SNR = '+str(SNRtot))
 
         return SNRtot-SNR0
 
-    zmax = np.zeros_like(SNRmin)
-    for k in np.arange(len(SNRmin)):
-        zmax[k] = optimize.root(lambda x: dSNR(x, SNRmin[k]), 5).x[0]
+    for k in np.arange(len(detSNR)):
+        for d in np.arange(len(network.detectors)):
+            zmax = optimize.root(lambda x: dSNR(x, network.detectors[d], detSNR[k]), 5).x[0]
 
-    return zmax
+            print(network.detectors[d].name + ' horizon (time-invariant antenna pattern; M='
+                  + str(parameters['mass_1']+parameters['mass_2']) + '; SNR>' + str(detSNR[k]) + '): z={:.3f}'.format(zmax))
 
 def parameterHistograms(parameters, population):
-    hist, zz = np.histogram(parameters['redshift'].to_numpy(), np.linspace(0, 100, 1001))
+    hist, zz = np.histogram(parameters['redshift'].to_numpy(), np.linspace(0, 20, 201))
     plt.bar(0.5*(zz[0:-1]+zz[1:]), hist, align='center', alpha=0.5, width=0.9*(zz[1]-zz[0]))
     plt.xlabel('Redshift of analyzed signals')
     plt.ylabel('Count')
-    plt.xlim(0, 10)#np.ceil(np.max(parameters['redshift'].to_numpy())))
+    plt.xlim(0, np.ceil(np.max(parameters['redshift'].to_numpy())))
     plt.grid(True)
     plt.tight_layout()
     plt.savefig('Histogram_' + population + '_redshift.png', dpi=300)
     plt.close()
 
-    plt.hist(parameters['mass_1'].to_numpy(), np.linspace(1.15, 1.5, 101))
+    plt.hist(parameters['mass_1'].to_numpy(), bins=31)
     plt.xlabel('M1')
     plt.grid(True)
     plt.tight_layout()
     plt.savefig('Histogram_' + population + '_M1.png', dpi=300)
     plt.close()
 
-    plt.hist(parameters['mass_2'].to_numpy(), np.linspace(1.15, 1.3, 101))
-    plt.xlabel('M1')
+    plt.hist(parameters['mass_2'].to_numpy(), bins=31)
+    plt.xlabel('M2')
     plt.grid(True)
     plt.tight_layout()
     plt.savefig('Histogram_' + population + '_M2.png', dpi=300)
     plt.close()
 
-def analyzeDetections(network_SNR, threshold_ii, SNR0, parameters, population, tag=''):
-        ns = len(network_SNR)
-        nSNR = len(threshold_ii[0,:])
-        maxz = np.zeros_like(SNR0)
-        for k in np.arange(nSNR):
-            ii = np.where(threshold_ii[:,k] == 1)[0]
-            ndet = len(ii)
-            maxz[k] = np.max(parameters['redshift'].iloc[ii].to_numpy())
-            maxSNR = np.max(network_SNR)
-            print('Detected signals with SNR>{:.3f}: {:.3f} ({:} out of {:})'.format(SNR0[k], ndet/ns, ndet, ns))
-            print('Maximum detected redshift %.3f' % maxz[k])
+def analyzeDetections(network, parameters, population, networks_ids):
 
-        print('SNR: {:.1f} (min) , {:.1f} (max) '.format(np.min(network_SNR), np.max(network_SNR)))
+    detSNR = network.detection_SNR
+
+    ns = len(network.SNR)
+    nSNR = len(detSNR)
+    N = len(networks_ids)
+
+    network_names = []
+    for n in np.arange(N):
+        network_names.append('_'.join([network.detectors[k].name for k in networks_ids[n]]))
+
+    maxz = np.zeros_like(detSNR)
+    threshold_ii = np.zeros((N, ns, nSNR))
+    for n in np.arange(N):
+        network_ids = networks_ids[n]
+        network_name = network_names[n]
+
+        print('Network: '+network_name)
+
+        SNR = 0
+        for d in network_ids:
+            SNR += network.detectors[d].SNR**2
+        SNR = np.sqrt(SNR)
+        maxSNR = np.max(SNR)
+        for k in np.arange(len(detSNR)):
+            threshold_ii[n,:,k] = SNR>detSNR[k]
+            ndet = len(np.where(threshold_ii[n,:,k])[0])
+            maxz[k] = np.max(parameters['redshift'].iloc[np.where(threshold_ii[n,:,k])[0]].to_numpy())
+            print('Detected signals with SNR>{:.3f}: {:.3f} ({:} out of {:}); z<{:.3f}'.format(detSNR[k], ndet/ns, ndet, ns, maxz[k]))
+
+        print('SNR: {:.1f} (min) , {:.1f} (max) '.format(np.min(SNR), maxSNR))
 
         hist_tot, zz = np.histogram(parameters['redshift'].iloc[0:ns].to_numpy(), np.linspace(0, 100, 1001))
 
         for k in np.arange(nSNR):
-            ii = np.where(threshold_ii[:,k]==1)
-            hist_det, zz = np.histogram(parameters['redshift'].iloc[ii].to_numpy(), zz)
+            hist_det, zz = np.histogram(parameters['redshift'].iloc[np.where(threshold_ii[n,:,k])[0]].to_numpy(), zz)
             plt.bar(0.5*(zz[0:-1]+zz[1:]), hist_det, align='center', alpha=0.5, width=0.9*(zz[1]-zz[0]))
         plt.xlabel('Redshift of detected signals')
         plt.ylabel('Count')
         plt.xlim(0, np.ceil(np.max(maxz)))
         plt.grid(True)
         plt.tight_layout()
-        plt.legend(['SNR>' + s for s in SNR0.astype(str)])
-        plt.savefig('Histogram_' + population + '_z_' + tag + '.png', dpi=300)
+        plt.legend(['SNR>' + s for s in detSNR.astype(str)])
+        plt.savefig('Histogram_' + population + '_' + network_name + '_z.png', dpi=300)
         plt.close()
 
         hist_tot[np.where(hist_tot<1)] = 1e10
         for k in np.arange(nSNR):
-            ii = np.where(threshold_ii[:,k]==1)
-            hist_det, zz = np.histogram(parameters['redshift'].iloc[ii].to_numpy(), zz)
+            hist_det, zz = np.histogram(parameters['redshift'].iloc[np.where(threshold_ii[n,:,k])[0]].to_numpy(), zz)
             plt.bar(0.5*(zz[0:-1]+zz[1:]), hist_det/hist_tot, align='center', alpha=0.5, width=0.9*(zz[1]-zz[0]))
         plt.xlabel('Redshift')
         plt.ylabel('Detection efficiency')
         plt.xlim(0, np.ceil(np.max(maxz)))
         plt.grid(True)
         plt.tight_layout()
-        plt.legend(['SNR>' + s for s in SNR0.astype(str)])
-        plt.savefig('Efficiency_' + population + '_z_' + tag + '.png', dpi=300)
+        plt.legend(['SNR>' + s for s in detSNR.astype(str)])
+        plt.savefig('Efficiency_' + population + '_' + network_name + '_z.png', dpi=300)
         plt.close()
 
-        n, bins, patches = plt.hist(network_SNR, np.linspace(0, np.ceil(maxSNR), 51), facecolor='g', alpha=0.75)
+        plt.hist(SNR, np.linspace(0, np.ceil(maxSNR), 51), facecolor='g', alpha=0.75)
         plt.xlabel('SNR')
         plt.ylabel('Count')
         plt.xlim(0, np.ceil(maxSNR))
         plt.grid(True)
         plt.tight_layout()
-        plt.savefig('Histogram_' + population + '_SNR_' + tag + '.png', dpi=300)
+        plt.savefig('Histogram_' + population + '_' + network_name + '_SNR.png', dpi=300)
         plt.close()
+
+    maxz = np.zeros(N)
+    for n in np.arange(N):
+        ii = np.where(threshold_ii[n, :, 0])[0]
+        maxz[n] = np.max(parameters['redshift'].iloc[ii].to_numpy())
+        hist_det, zz = np.histogram(parameters['redshift'].iloc[ii].to_numpy(), zz)
+        plt.bar(0.5 * (zz[0:-1] + zz[1:]), hist_det / hist_tot, align='center', alpha=0.5,
+                width=0.9 * (zz[1] - zz[0]))
+    plt.xlabel('Redshift')
+    plt.ylabel('Detection efficiency')
+    plt.xlim(0, np.ceil(np.max(maxz)))
+    plt.grid(True)
+    plt.tight_layout()
+    plt.legend([network_names[n] for n in np.arange(N)])
+    plt.savefig('Efficiency_' + population + '_SNR' + str(detSNR[0]) + '_z.png', dpi=300)
+    plt.close()
 
 def main():
 
@@ -507,12 +548,13 @@ def main():
     fs = 2048   # good for BNS in ET
     T = 4    # good for ET with TaylorF2
 
-    ns = 10000 #820000  # number of signals to simulate (1e6 is maximum for BBH, 820000 is maximum for BNS)
+    ns = 820000  # number of signals to simulate (1e6 is maximum for BBH, 820000 is maximum for BNS)
 
     detSNR = np.array([8., 12., 25., 50.])  #SNR detection thresholds
 
     population = 'BNS'
-    networks = [['ET', 'CE1'], ['ET']]
+    detectors_ids = ['ET','CE1','CEA']
+    networks_ids = [[0, 1, 2], [0, 1], [0]]
 
     cosmo = FlatLambdaCDM(H0=69.6, Om0=0.286)
 
@@ -522,8 +564,8 @@ def main():
                                  delimiter=' ').sample(frac=1).iloc[0:ns]
     if population == 'BNS':
         # here it is neglected that p(z) is different for BNS and BBH
-        parameters['mass_1'] = parameters_BNS['mass_1'].to_numpy()
-        parameters['mass_2'] = parameters_BNS['mass_2'].to_numpy()
+        parameters['mass_1'] = 1.4 #parameters_BNS['mass_1'].to_numpy()
+        parameters['mass_2'] = 1.4 #parameters_BNS['mass_2'].to_numpy()
         parameters['redshift'] = parameters_BNS['redshift'].to_numpy()
 
     parameterHistograms(parameters, population)
@@ -531,52 +573,41 @@ def main():
     frequencyvector = np.linspace(0.0, fs / 2.0, (fs * T) // 2 + 1)
     frequencyvector = frequencyvector[:, np.newaxis]
 
-    for n in np.arange(len(networks)):
-        network = Network(networks[n])
+    network = Network(detectors_ids, number_of_signals=ns, detection_SNR=detSNR)
 
-        if len(detSNR)==1:
-            population = 'BNS_'+network.name+'_SNR'+str(detSNR)
-        else:
-            population = 'BNS_'+network.name+'_mSNR'
+    horizon(network, parameters.iloc[0], cosmo, frequencyvector, detSNR)
 
-        zmax = horizon(network.detectors, parameters.iloc[0], cosmo, frequencyvector, detSNR)
-        for k in np.arange(len(detSNR)):
-            print(population + ' horizon (time-invariant antenna pattern; M='
-                  + str(parameters['mass_1'].iloc[0]+parameters['mass_2'].iloc[0]) + '; SNR>'
-                  + str(detSNR[k]) + '): {:.3f}'.format(zmax[k]))
+    print('Processing CBC population')
+    bar = progressbar.ProgressBar(max_value=ns)
+    for k in np.arange(ns):
+        #GW150914 = {'mass_1': 36.2, 'mass_2': 29.1, 'geocent_time': 1126259642.413, 'phase': 1.3, 'ra': 1.375, 'dec': -1.2108,
+        #                  'psi': 2.659, 'iota': 0.3, 'redshift': 0.093}
+        #parameters.iloc[k] = GW150914
 
-        network_SNR = np.zeros(ns)
-        threshold_ii = np.zeros((ns, len(detSNR)))
+        one_parameters = parameters.iloc[k]
 
-        print('Processing CBC population')
-        bar = progressbar.ProgressBar(max_value=ns)
-        for k in np.arange(ns):
-            #GW150914 = {'mass_1': 36.2, 'mass_2': 29.1, 'geocent_time': 1126259642.413, 'phase': 1.3, 'ra': 1.375, 'dec': -1.2108,
-            #                  'psi': 2.659, 'iota': 0.3, 'redshift': 0.093}
-            #parameters.iloc[k] = GW150914
+        # characteristic time scale
+        dT = 1./fisco(one_parameters)
 
-            one_parameters = parameters.iloc[k]
+        wave, t_of_f = TaylorF2(one_parameters, cosmo, frequencyvector[1:,:], maxn=8)
+        t_of_f = np.zeros_like(t_of_f)
 
-            # characteristic time scale
-            dT = 1./fisco(one_parameters)
-
-            wave, t_of_f = TaylorF2(one_parameters, cosmo, frequencyvector[1:,:], maxn=8)
-            t_of_f = np.zeros_like(t_of_f)
-            signal = projection(one_parameters, network.detectors, wave, t_of_f)
+        network.SNR[k] = 0
+        for d in np.arange(len(network.detectors)):
+            signal = projection(one_parameters, network.detectors[d].interferometers, wave, t_of_f)
             # fill the first sample of Fourier spectra with value 0, since it was left out to avoid division at f=0
-            signal = np.vstack((np.zeros(len(network.detectors)),signal))
+            signal = np.vstack((np.zeros(len(signal[0,:])),signal))
 
-            SNRs = SNR(network.detectors, signal, T, fs, duty_cycle=True) #, plot='FD'+str(k))[0]
-            network_SNR[k] = np.sqrt(np.sum(SNRs**2))
-            for l in np.arange(len(detSNR)):
-                if (network_SNR[k]>detSNR[l]):
-                    threshold_ii[k,l] = 1
+            SNRs = SNR(network.detectors[d].interferometers, signal, T, fs, duty_cycle=True)
+            network.SNR[k] += np.sum(SNRs**2)
+            network.detectors[d].SNR[k] = np.sqrt(np.sum(SNRs**2))
+        network.SNR[k] = np.sqrt(network.SNR[k])
 
-            bar.update(k)
+        bar.update(k)
 
-        bar.finish()
+    bar.finish()
 
-        analyzeDetections(network_SNR, threshold_ii, detSNR, parameters, population, tag='')
+    analyzeDetections(network, parameters, population, networks_ids)
 
 
 if __name__ == '__main__':
