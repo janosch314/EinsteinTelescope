@@ -508,19 +508,6 @@ def analyzeDetections(network, parameters, population, networks_ids):
         plt.savefig('Histogram_' + population + '_' + network_name + '_z.png', dpi=300)
         plt.close()
 
-        hist_tot[np.where(hist_tot<1)] = 1e10
-        for k in np.arange(nSNR):
-            hist_det, zz = np.histogram(parameters['redshift'].iloc[np.where(threshold_ii[n,:,k])[0]].to_numpy(), zz)
-            plt.bar(0.5*(zz[0:-1]+zz[1:]), hist_det/hist_tot, align='center', alpha=0.5, width=0.9*(zz[1]-zz[0]))
-        plt.xlabel('Redshift')
-        plt.ylabel('Detection efficiency')
-        plt.xlim(0, np.ceil(np.max(maxz)))
-        plt.grid(True)
-        plt.tight_layout()
-        plt.legend(['SNR>' + s for s in detSNR.astype(str)])
-        plt.savefig('Efficiency_' + population + '_' + network_name + '_z.png', dpi=300)
-        plt.close()
-
         plt.hist(SNR, np.linspace(0, np.ceil(maxSNR), 51), facecolor='g', alpha=0.75)
         plt.xlabel('SNR')
         plt.ylabel('Count')
