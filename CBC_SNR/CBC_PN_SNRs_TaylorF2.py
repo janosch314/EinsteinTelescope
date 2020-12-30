@@ -530,69 +530,6 @@ def analyzeDetections(network, parameters, population, networks_ids):
         plt.savefig('Histogram_' + population + '_' + network_name + '_SNR.png', dpi=300)
         plt.close()
 
-    maxz = np.zeros(N)
-    save_data = 0.5*(zz[0:-1]+zz[1:])
-    for n in np.arange(N):
-        ii = np.where(threshold_ii[n, :, 0])[0]
-        maxz[n] = np.max(parameters['redshift'].iloc[ii].to_numpy())
-        hist_det, zz = np.histogram(parameters['redshift'].iloc[ii].to_numpy(), zz)
-        save_data = np.vstack((save_data, hist_det/hist_tot))
-        plt.bar(0.5*(zz[0:-1]+zz[1:]), hist_det/hist_tot, align='center', alpha=0.5,
-                width=0.9*(zz[1]-zz[0]))
-    plt.xlabel('Redshift')
-    plt.ylabel('Detection efficiency')
-    plt.xlim(0, np.ceil(np.max(maxz)))
-    plt.grid(True)
-    plt.tight_layout()
-    plt.legend([network_names[n] for n in np.arange(N)])
-    plt.savefig('Efficiency_' + population + '_SNR' + str(detSNR[0]) + '_z.png', dpi=300)
-    plt.close()
-    np.savetxt('Efficiency_' + population + '_SNR' + str(detSNR[0]) + '_z.txt', save_data.T, delimiter=' ', fmt='%.3f')
-
-    ii_on_axis = np.where(np.logical_or(parameters['iota']<np.pi*5./180., parameters['iota']>np.pi*175./180.))
-    hist_on_axis, zz = np.histogram(parameters['redshift'].iloc[ii_on_axis].to_numpy(), zz)
-    hist_on_axis[np.where(hist_on_axis < 1)] = 1e10
-    save_data = 0.5*(zz[0:-1]+zz[1:])
-    for n in np.arange(N):
-        ii = np.where(np.logical_and(threshold_ii[n, :, 0],
-                np.logical_or(parameters['iota']<np.pi*5./180., parameters['iota']>np.pi*175./180.)))
-        maxz[n] = np.max(parameters['redshift'].iloc[ii].to_numpy())
-        hist_det, zz = np.histogram(parameters['redshift'].iloc[ii].to_numpy(), zz)
-        save_data = np.vstack((save_data, hist_det/hist_on_axis))
-        plt.bar(0.5 * (zz[0:-1] + zz[1:]), hist_det / hist_on_axis, align='center', alpha=0.5,
-                width=0.9 * (zz[1] - zz[0]))
-    plt.xlabel('Redshift')
-    plt.ylabel('Detection efficiency')
-    plt.xlim(0, np.ceil(np.max(maxz)))
-    plt.grid(True)
-    plt.tight_layout()
-    plt.legend([network_names[n] for n in np.arange(N)])
-    plt.savefig('Efficiency_' + population + '_SNR' + str(detSNR[0]) + '_deg5_z.png', dpi=300)
-    plt.close()
-    np.savetxt('Efficiency_' + population + '_SNR' + str(detSNR[0]) + '_deg5_z.txt', save_data.T, delimiter=' ', fmt='%.3f')
-
-    ii_on_axis = np.where(np.logical_or(parameters['iota']<np.pi*10./180., parameters['iota']>np.pi*170./180.))
-    hist_on_axis, zz = np.histogram(parameters['redshift'].iloc[ii_on_axis].to_numpy(), zz)
-    hist_on_axis[np.where(hist_on_axis < 1)] = 1e10
-    save_data = 0.5*(zz[0:-1]+zz[1:])
-    for n in np.arange(N):
-        ii = np.where(np.logical_and(threshold_ii[n, :, 0],
-                np.logical_or(parameters['iota']<np.pi*10./180., parameters['iota']>np.pi*170./180.)))
-        maxz[n] = np.max(parameters['redshift'].iloc[ii].to_numpy())
-        hist_det, zz = np.histogram(parameters['redshift'].iloc[ii].to_numpy(), zz)
-        save_data = np.vstack((save_data, hist_det/hist_on_axis))
-        plt.bar(0.5*(zz[0:-1]+zz[1:]), hist_det/hist_on_axis, align='center', alpha=0.5,
-                width=0.9*(zz[1]-zz[0]))
-    plt.xlabel('Redshift')
-    plt.ylabel('Detection efficiency')
-    plt.xlim(0, np.ceil(np.max(maxz)))
-    plt.grid(True)
-    plt.tight_layout()
-    plt.legend([network_names[n] for n in np.arange(N)])
-    plt.savefig('Efficiency_' + population + '_SNR' + str(detSNR[0]) + '_deg10_z.png', dpi=300)
-    plt.close()
-    np.savetxt('Efficiency_' + population + '_SNR' + str(detSNR[0]) + '_deg10_z.txt', save_data.T, delimiter=' ', fmt='%.3f')
-
 def main():
 
     #fs = 1024    # good for BBH in ET
