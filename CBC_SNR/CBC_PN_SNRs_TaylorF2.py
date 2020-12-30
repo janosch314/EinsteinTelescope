@@ -156,7 +156,7 @@ class Detector:
                     Interferometer(name=name, interferometer=k, plot=plot))
         else:
             self.interferometers.append(
-                Interferometer(name=name, interferometer='', plot=plot))
+                Interferometer(name=name, interferometer=0, plot=plot))
 
 class Network:
 
@@ -427,7 +427,7 @@ def horizon(network, parameters, cosmo, frequencyvector, detSNR):
 
     for k in np.arange(len(detSNR)):
         for d in np.arange(len(network.detectors)):
-            zmax = optimize.root(lambda x: dSNR(x, network.detectors[d], detSNR[k]), 5).x[0]
+            zmax = optimize.root(lambda x: dSNR(x, network.detectors[d], detSNR[k]), 5.).x[0]
 
             print(network.detectors[d].name + ' horizon (time-invariant antenna pattern; M='
                   + str(parameters['mass_1']+parameters['mass_2']) + '; SNR>' + str(detSNR[k]) + '): z={:.3f}'.format(zmax))
@@ -456,66 +456,6 @@ def parameterHistograms(parameters, population):
     plt.tight_layout()
     plt.savefig('Histogram_' + population + '_M2.png', dpi=300)
     plt.close()
-
-def analyzeDetections(network, parameters, population, networks_ids):
-
-    detSNR = network.detection_SNR
-
-    ns = len(network.SNR)
-    nSNR = len(detSNR)
-    N = len(networks_ids)
-
-    #zz = np.linspace(0, 9, 31)
-    zz = np.linspace(0, 100, 1001)
-
-    network_names = []
-    for n in np.arange(N):
-        network_names.append('_'.join([network.detectors[k].name for k in networks_ids[n]]))
-
-    maxz = np.zeros_like(detSNR)
-    threshold_ii = np.zeros((N, ns, nSNR))
-    for n in np.arange(N):
-        network_ids = networks_ids[n]
-        network_name = network_names[n]
-
-        print('Network: '+network_name)
-
-        SNR = 0
-        for d in network_ids:
-            SNR += network.detectors[d].SNR**2
-        SNR = np.sqrt(SNR)
-        maxSNR = np.max(SNR)
-        for k in np.arange(len(detSNR)):
-            threshold_ii[n,:,k] = SNR>detSNR[k]
-            ndet = len(np.where(threshold_ii[n,:,k])[0])
-            if np.where(threshold_ii[n,:,k])[0].size>0:
-                maxz[k] = np.max(parameters['redshift'].iloc[np.where(threshold_ii[n,:,k])[0]].to_numpy())
-            print('Detected signals with SNR>{:.3f}: {:.3f} ({:} out of {:}); z<{:.3f}'.format(detSNR[k], ndet/ns, ndet, ns, maxz[k]))
-
-        print('SNR: {:.1f} (min) , {:.1f} (max) '.format(np.min(SNR), maxSNR))
-
-        hist_tot, zz = np.histogram(parameters['redshift'].iloc[0:ns].to_numpy(), zz)
-
-        for k in np.arange(nSNR):
-            hist_det, zz = np.histogram(parameters['redshift'].iloc[np.where(threshold_ii[n,:,k])[0]].to_numpy(), zz)
-            plt.bar(0.5*(zz[0:-1]+zz[1:]), hist_det, align='center', alpha=0.5, width=0.9*(zz[1]-zz[0]))
-        plt.xlabel('Redshift of detected signals')
-        plt.ylabel('Count')
-        plt.xlim(0, np.ceil(np.max(maxz)))
-        plt.grid(True)
-        plt.tight_layout()
-        plt.legend(['SNR>' + s for s in detSNR.astype(str)])
-        plt.savefig('Histogram_' + population + '_' + network_name + '_z.png', dpi=300)
-        plt.close()
-
-        plt.hist(SNR, np.linspace(0, np.ceil(maxSNR), 51), facecolor='g', alpha=0.75)
-        plt.xlabel('SNR')
-        plt.ylabel('Count')
-        plt.xlim(0, np.ceil(maxSNR))
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig('Histogram_' + population + '_' + network_name + '_SNR.png', dpi=300)
-        plt.close()
 
 def main():
 
@@ -581,8 +521,6 @@ def main():
         bar.update(k)
 
     bar.finish()
-
-    analyzeDetections(network, parameters, population, networks_ids)
 
 
 if __name__ == '__main__':
